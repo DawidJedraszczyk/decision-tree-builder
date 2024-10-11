@@ -1,5 +1,7 @@
 import math
 from collections import Counter
+import pandas as pd
+
 
 
 class DecisionTreeInductor:
@@ -20,7 +22,7 @@ class DecisionTreeInductor:
             self.decisions.extend(decision_list)
 
         for key in self.data.keys():
-            self.keys.extend(key)
+            self.keys.append(key)
 
         self.decision_counts = Counter(self.decisions)  # no = 5 yes = 5
         self.total_decisions = self.total_decisions = sum(decision for decision in self.decision_counts.values())  # 10
@@ -31,12 +33,13 @@ class DecisionTreeInductor:
         entropy_results = {}
 
         # entropy for all decisions
-        entropy_results['entropy_value'] = self._entropy_calculation(**self.decision_counts)
+        entropy_results['entropy_value'] = self._entropy_calculation(
+            **{str(k): v for k, v in self.decision_counts.items()})
 
         # entropy for decisions for one key
         for key, decision_list in self.data.items():
             decision_counts = Counter(decision_list)
-            entropy_value = self._entropy_calculation(**decision_counts)
+            entropy_value = self._entropy_calculation(**{str(k): v for k, v in decision_counts.items()})
 
             # Dynamically create a key for each entropy result
             entropy_results[f'entropy_{key}'] = entropy_value
@@ -46,17 +49,19 @@ class DecisionTreeInductor:
             decision_size = len(decision_list)
             probability = decision_size / self.total_decisions
             conditional_entropy += (probability * entropy_results[f'entropy_{key}'])
+
         entropy_results['conditional_entropy'] = conditional_entropy
 
         entropy_results['information_gain'] = self._information_gain_calculation(entropy_results['entropy_value'],
                                                                                  entropy_results['conditional_entropy'])
 
-        entropy_results['intrinsic_info'] = self._intrinsic_info_calculation(**self.keys_probability)
+        entropy_results['intrinsic_info'] = self._intrinsic_info_calculation(**{str(k): v for k, v in self.keys_probability.items()})
 
         entropy_results['gain_ratio'] = self._gain_ratio_calculation(entropy_results['information_gain'],
                                                                      entropy_results['intrinsic_info'])
 
         print(entropy_results)
+        print("")
 
     def _entropy_calculation(self, **kwargs) -> float:
         """
@@ -95,6 +100,14 @@ class DecisionTreeInductor:
     def _count_keys_probability(self):
         return {key: len(decision_list) / self.total_decisions for key, decision_list in self.data.items()}
 
+if __name__ == "__main__":
+    data = pd.read_csv("data/titanic-homework.csv")
+    attributes = [col for col in data.columns if col not in ['Survived', 'PassengerId', 'Name']]
 
-dec = DecisionTreeInductor()
-dec.run()
+    for attribute in attributes:
+        data_for_attribute = data[[attribute, 'Survived']]
+        grouped_data = data_for_attribute.groupby(attribute)['Survived'].apply(list).to_dict()  # Convert to dict
+
+        print(attribute)
+        dti = DecisionTreeInductor(data=grouped_data)  # Pass as a dict
+        dti.run()
