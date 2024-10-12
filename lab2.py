@@ -1,7 +1,17 @@
 import math
 from collections import Counter
 import pandas as pd
+from graphviz import Digraph
+import pydotplus
 
+
+class DecisionTreeNode:
+    def __init__(self, attribute=None, value=None, branches=None, is_leaf=False, label=None):
+        self.attribute = attribute  # Attribute the node splits on
+        self.value = value  # Value of the attribute
+        self.branches = branches or {}  # Dictionary of child nodes for each attribute value
+        self.is_leaf = is_leaf  # True if it's a leaf node
+        self.label = label  # Class label if it's a leaf node
 
 
 class DecisionTreeInductor:
@@ -27,6 +37,7 @@ class DecisionTreeInductor:
         self.decision_counts = Counter(self.decisions)  # no = 5 yes = 5
         self.total_decisions = self.total_decisions = sum(decision for decision in self.decision_counts.values())  # 10
         self.keys_probability = self._count_keys_probability()
+        self.graph = Digraph()
         print(self.keys_probability)
 
     def run(self):
@@ -62,6 +73,58 @@ class DecisionTreeInductor:
 
         print(entropy_results)
         print("")
+
+    def build_tree(self, data, attributes):
+        # Base cases
+        if all_same_class(data['Survived']):
+            return DecisionTreeNode(is_leaf=True, label=data['Survived'].iloc[0])
+
+        if not attributes:
+            # Return a leaf node with the most common class
+            most_common_label = data['Survived'].mode()[0]
+            return DecisionTreeNode(is_leaf=True, label=most_common_label)
+
+        # Find the best attribute to split on
+        best_attribute = self._find_best_attribute(data, attributes)
+
+        # Create a new decision tree node for the best attribute
+        node = DecisionTreeNode(attribute=best_attribute)
+
+        # Split the dataset and recursively build the tree for each subset
+        for value in data[best_attribute].unique():
+            subset = data[data[best_attribute] == value]
+            # Remove the current attribute from the set of available attributes
+            new_attributes = [attr for attr in attributes if attr != best_attribute]
+            node.branches[value] = self.build_tree(subset, new_attributes)
+
+        return node
+
+    def _find_best_attribute(self, data, attributes):
+        # Implement information gain or gain ratio to select the best attribute
+        best_gain = -float('inf')
+        best_attribute = None
+
+        for attribute in attributes:
+            grouped_data = data.groupby(attribute)['Survived'].apply(list).to_dict()
+            self.data = grouped_data
+            self.run()
+            # Use information gain or gain ratio from the run results
+            gain = self._information_gain_calculation(
+                self._entropy_calculation(**{str(k): v for k, v in self.decision_counts.items()}),
+                self._conditional_entropy_calculation(
+                    (len(grouped_data[key]) / self.total_decisions,
+                     self._entropy_calculation(**Counter(grouped_data[key]))) for key in grouped_data
+                )
+            )
+
+            if gain > best_gain:
+                best_gain = gain
+                best_attribute = attribute
+
+        return best_attribute
+
+    def visualize_tree(self):
+        self.graph.render('decision_tree', view=True, format='png')
 
     def _entropy_calculation(self, **kwargs) -> float:
         """
@@ -100,14 +163,14 @@ class DecisionTreeInductor:
     def _count_keys_probability(self):
         return {key: len(decision_list) / self.total_decisions for key, decision_list in self.data.items()}
 
+def all_same_class(column):
+    """Check if all values in the column are the same (i.e., same class)."""
+    return column.nunique() == 1
+
 if __name__ == "__main__":
     data = pd.read_csv("data/titanic-homework.csv")
     attributes = [col for col in data.columns if col not in ['Survived', 'PassengerId', 'Name']]
 
-    for attribute in attributes:
-        data_for_attribute = data[[attribute, 'Survived']]
-        grouped_data = data_for_attribute.groupby(attribute)['Survived'].apply(list).to_dict()  # Convert to dict
-
-        print(attribute)
-        dti = DecisionTreeInductor(data=grouped_data)  # Pass as a dict
-        dti.run()
+    dti = DecisionTreeInductor()
+    decision_tree = dti.build_tree(data, attributes)
+    dti.visualize_tree()  # This will render and open the tree visualization
