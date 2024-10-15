@@ -1,33 +1,34 @@
 import math
 from collections import Counter
 import pandas as pd
-
+pd.options.mode.chained_assignment = None
 
 
 class DecisionTreeInductor:
-    def __init__(self, data: dict = None):
-        """
-        :param data:
-        ex. {'low': ['no', 'no'], 'med': ['yes', 'no'], 'high': ['yes', 'yes', 'yes', 'no', 'yes', 'no']}
-        """
-        self.data = data or {
-            'low': ['no', 'no'],
-            'med': ['yes', 'no'],
-            'high': ['yes', 'yes', 'yes', 'no', 'yes', 'no']
-        }
-        self.decisions = []  # no, no, yes, no, ...
-        self.keys = []  # low, med, high
+    def __init__(self, data: dict = None, target_label: str = 'Survived',  excluded_keys: list = []):
+        self.data = data
+        self.excluded_keys = excluded_keys
+        self.TARGET_LABEL = target_label
 
-        for decision_list in self.data.values():
-            self.decisions.extend(decision_list)
+        self.decisions = []
 
-        for key in self.data.keys():
-            self.keys.append(key)
+        self.keys = []
+        self.key_lists = {}
 
-        self.decision_counts = Counter(self.decisions)  # no = 5 yes = 5
+        for key in self.data[0].keys():
+            if key not in self.excluded_keys and key != self.TARGET_LABEL:
+                self.keys.append(key)
+                self.key_lists[key] = []
+
+        for record in self.data:
+            self.decisions.append(record[self.TARGET_LABEL])
+            for key in self.keys:
+                self.key_lists[key].append({'value': record[key], 'decision': record[self.TARGET_LABEL]})
+
+
+        self.decision_counts = Counter(self.decisions)
         self.total_decisions = self.total_decisions = sum(decision for decision in self.decision_counts.values())  # 10
-        self.keys_probability = self._count_keys_probability()
-        print(self.keys_probability)
+        self.keys_probabilities = self._count_keys_probabilities()
 
     def run(self):
         entropy_results = {}
@@ -37,31 +38,54 @@ class DecisionTreeInductor:
             **{str(k): v for k, v in self.decision_counts.items()})
 
         # entropy for decisions for one key
-        for key, decision_list in self.data.items():
-            decision_counts = Counter(decision_list)
-            entropy_value = self._entropy_calculation(**{str(k): v for k, v in decision_counts.items()})
+        conditional_entropy_data_holder = []
+        for key, value_list in self.key_lists.items():
+            # Group by key value, then count the decisions for each key value
+            key_value_counts = {}
+            for item in value_list:
+                key_value = item['value']
+                decision = item['decision']
+                if key_value not in key_value_counts:
+                    key_value_counts[key_value] = Counter()
+                key_value_counts[key_value][decision] += 1
 
-            # Dynamically create a key for each entropy result
-            entropy_results[f'entropy_{key}'] = entropy_value
+            # Calculate entropy for each key's value's decision counts
+            key_conditional_entropy = 0
+            intrinsic_info_data = {}
+            for key_value, decision_counts in key_value_counts.items():
+                # Entropy calculation for each key value
+                entropy_value = self._entropy_calculation(**{str(k): v for k, v in decision_counts.items()})
+                entropy_results[f'entropy_{key}_{key_value}'] = entropy_value
 
-        conditional_entropy = 0
-        for key, decision_list in self.data.items():
-            decision_size = len(decision_list)
-            probability = decision_size / self.total_decisions
-            conditional_entropy += (probability * entropy_results[f'entropy_{key}'])
+                # Probability of this key value
+                probability = sum(decision_counts.values()) / self.total_decisions
+                key_conditional_entropy += probability * entropy_value
 
-        entropy_results['conditional_entropy'] = conditional_entropy
+                # Store probability for intrinsic info calculation
+                intrinsic_info_data[key_value] = probability
 
-        entropy_results['information_gain'] = self._information_gain_calculation(entropy_results['entropy_value'],
-                                                                                 entropy_results['conditional_entropy'])
+                # Store data for conditional entropy calculation
+                conditional_entropy_data_holder.append([probability, entropy_value])
 
-        entropy_results['intrinsic_info'] = self._intrinsic_info_calculation(**{str(k): v for k, v in self.keys_probability.items()})
+            # Store the conditional entropy for this key
+            entropy_results[f'conditional_entropy_{key}'] = key_conditional_entropy
 
-        entropy_results['gain_ratio'] = self._gain_ratio_calculation(entropy_results['information_gain'],
-                                                                     entropy_results['intrinsic_info'])
+            # Calculate Information Gain for this key
+            information_gain = self._information_gain_calculation(
+                entropy_results['entropy_value'], entropy_results[f'conditional_entropy_{key}']
+            )
+            entropy_results[f'information_gain_{key}'] = information_gain
 
-        print(entropy_results)
-        print("")
+            # Calculate Intrinsic Info for this key
+            intrinsic_info = self._intrinsic_info_calculation(**{str(k): v for k, v in intrinsic_info_data.items()})
+            entropy_results[f'intrinsic_info_{key}'] = intrinsic_info
+
+            # Calculate Gain Ratio for this key
+            gain_ratio = self._gain_ratio_calculation(information_gain, intrinsic_info)
+            entropy_results[f'gain_ratio_{key}'] = gain_ratio
+
+
+        return entropy_results
 
     def _entropy_calculation(self, **kwargs) -> float:
         """
@@ -82,8 +106,7 @@ class DecisionTreeInductor:
         """
         return sum(probability * entropy for probability, entropy in args)
 
-    def _information_gain_calculation(self, entropy_calculation_value: float,
-                                      conditional_entropy_calculation_value: float) -> float:
+    def _information_gain_calculation(self, entropy_calculation_value: float, conditional_entropy_calculation_value: float) -> float:
         """
         :param args -> result of entropy_calculation -> float, conditional_entropy_calculation -> float:
         :return information gain value -> float
@@ -93,21 +116,43 @@ class DecisionTreeInductor:
     def _intrinsic_info_calculation(self, **kwargs):
         return self._entropy_calculation(**kwargs)
 
-    def _gain_ratio_calculation(self, information_gain_calculation_value: float,
-                                intrinsic_info_calculation_value: float) -> float:
+    def _gain_ratio_calculation(self, information_gain_calculation_value: float, intrinsic_info_calculation_value: float) -> float:
         return information_gain_calculation_value / intrinsic_info_calculation_value
 
-    def _count_keys_probability(self):
-        return {key: len(decision_list) / self.total_decisions for key, decision_list in self.data.items()}
+    def _count_keys_probabilities(self):
+        return {key: len(key_list) / self.total_decisions for key, key_list in self.key_lists.items()}
+
+    def build_tree(self):
+        pass
+
+
+def categorize_age(age):
+    if 0 <= age <= 20:
+        return "young"
+    elif 20 < age <= 40:
+        return "middle"
+    elif 40 < age <= 100:
+        return "old"
+    else:
+        return "unknown"
+
 
 if __name__ == "__main__":
-    data = pd.read_csv("data/titanic-homework.csv")
-    attributes = [col for col in data.columns if col not in ['Survived', 'PassengerId', 'Name']]
+    #data = pd.read_csv("data/titanic-homework.csv").to_dict(orient='records')
 
-    for attribute in attributes:
-        data_for_attribute = data[[attribute, 'Survived']]
-        grouped_data = data_for_attribute.groupby(attribute)['Survived'].apply(list).to_dict()  # Convert to dict
+    data = [
+        {'buying_price': 'high', 'doors':'4', 'safety': 'low', 'Survived': False},
+        {'buying_price': 'high', 'doors':'5more', 'safety': 'high', 'Survived': True},
+        {'buying_price': 'low', 'doors':'5more', 'safety': 'high', 'Survived': True},
+        {'buying_price': 'low', 'doors':'5more', 'safety': 'low', 'Survived': False},
+        {'buying_price': 'low', 'doors':'4', 'safety': 'med', 'Survived': True},
+        {'buying_price': 'low', 'doors':'4', 'safety': 'high', 'Survived': True},
+        {'buying_price': 'med', 'doors':'4', 'safety': 'high', 'Survived': False},
+        {'buying_price': 'med', 'doors':'3', 'safety': 'high', 'Survived': True},
+        {'buying_price': 'vhigh', 'doors':'3', 'safety': 'med', 'Survived': False},
+        {'buying_price': 'vhigh', 'doors':'5more', 'safety': 'high', 'Survived': False},
+    ]
 
-        print(attribute)
-        dti = DecisionTreeInductor(data=grouped_data)  # Pass as a dict
-        dti.run()
+    dti = DecisionTreeInductor(data=data)
+    entropies = dti.run()
+    print(entropies)
