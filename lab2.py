@@ -4,9 +4,9 @@ import pandas as pd
 pd.options.mode.chained_assignment = None
 
 class DecisionTreeInductor:
-    def __init__(self, data: dict = None, target_label: str = 'Survived',  excluded_keys: set = ()):
+    def __init__(self, data: dict = None, target_label: str = 'Survived',  excluded_keys: set = None):
         self.data = data
-        self.excluded_keys = excluded_keys
+        self.excluded_keys = excluded_keys or set()
         self.TARGET_LABEL = target_label
 
         self.decisions = [record[self.TARGET_LABEL] for record in data]
@@ -33,7 +33,7 @@ class DecisionTreeInductor:
         Recursively builds the decision tree.
         :param data: subset of data to build the tree on
         :param excluded_keys: set of keys to exclude from the splitting process (used in recursion)
-        :return: decision tree (dict)
+        :return: decision tree (dict) or leaf node with decision and class counts
         """
         if data is None:
             data = self.data
@@ -41,15 +41,13 @@ class DecisionTreeInductor:
         if excluded_keys is None:
             excluded_keys = self.excluded_keys.copy()
 
-
         # Get the counts of each decision in the current data subset
         decisions = [record[self.TARGET_LABEL] for record in data]
         decision_counts = Counter(decisions)
 
-
         # If all the data has the same decision (pure node), return it as a leaf node
         if len(decision_counts) == 1:
-            return decisions[0]  # return the single decision
+            return decisions[0], dict(decision_counts)  # return the single decision with the class counts
 
         # If no more attributes to split on, return the majority decision as a leaf node
         ended = True
@@ -58,7 +56,7 @@ class DecisionTreeInductor:
                 ended = False
                 break
         if ended:
-            return decision_counts.most_common(1)[0][0]  # return the majority class
+            return decision_counts.most_common(1)[0][0], dict(decision_counts)  # return the majority class with counts
 
         # Select the best key to split on (you can choose either information gain or gain ratio)
         best_key = self._select_best_key(data, excluded_keys)
@@ -220,11 +218,10 @@ class DecisionTreeInductor:
     def _count_keys_probabilities(self):
         return {key: len(key_list) / self.total_decisions for key, key_list in self.key_lists.items()}
 
-
     def print_tree(self, tree, depth=0):
         """
         Recursively prints the decision tree in a readable format with indentation.
-        :param tree: the decision tree (dict)
+        :param tree: the decision tree (dict or tuple)
         :param depth: current depth level in the tree (used for indentation)
         """
         indent = "  " * depth  # Indentation based on the tree depth
@@ -234,39 +231,42 @@ class DecisionTreeInductor:
                 if isinstance(value, dict):
                     self.print_tree(value, depth + 1)  # Recurse into subtree with increased depth
                 else:
-                    print(f"{indent}  -> {value}")  # Print leaf node (decision)
+                    self.print_tree(value, depth + 1)  # Handle the case when leaf node contains a tuple
+        elif isinstance(tree, tuple):
+            # Leaf node: unpack the decision and the class counts
+            decision, class_counts = tree
+            counts_str = ', '.join([f"{cls}: {count}" for cls, count in class_counts.items()])
+            print(f"{indent}-> {decision} (Counts: {counts_str})")
         else:
             print(f"{indent}-> {tree}")  # Handle case for direct decision values
 
-
     def check_prediction(self, tree, record):
         """
-        Sprawdza przewidywanie dla pojedynczego rekordu w drzewie decyzyjnym.
-        :param tree: Drzewo decyzyjne (słownik).
-        :param record: Pojedynczy rekord (słownik) z danymi.
-        :return: Przewidywana wartość (np. True/False dla 'Survived').
+        Checks the prediction for a single record in the decision tree.
+        :param tree: Decision tree (dict).
+        :param record: Single record (dict) from the dataset.
+        :return: Predicted value (e.g., True/False for target label).
         """
         if isinstance(tree, dict):
-            # Pobierz atrybut na którym następuje podział (pierwszy klucz w słowniku)
             attribute = list(tree.keys())[0]
             value = record[attribute]
 
             if value in tree[attribute]:
-                # Rekurencyjnie przechodzimy do następnej gałęzi drzewa
                 return self.check_prediction(tree[attribute][value], record)
             else:
-                # Jeśli wartość nie istnieje w drzewie, zwróć domyślną wartość
                 return None
+        elif isinstance(tree, tuple):
+            return tree[0]
         else:
-            # Gdy dotrzemy do liścia drzewa, zwracamy wartość liścia
             return tree
 
 
-    def evaluate_tree(self, tree, data):
+
+    def evaluate_tree(self, tree: dict, data:list) -> float:
         """
-        Sprawdza poprawność przewidywań dla całego zbioru danych.
-        :param tree: Drzewo decyzyjne (słownik).
-        :param data: Dane (lista słowników).
+        Checks every single row of data if it match the tree
+        :param tree: dict.
+        :param data: data -> list of dicts.
         :return: Wynik procentowy poprawnych przewidywań.
         """
         correct_predictions = 0
@@ -277,13 +277,15 @@ class DecisionTreeInductor:
             prediction = self.check_prediction(tree, record)
 
             # Sprawdź, czy przewidywanie zgadza się z rzeczywistą wartością
-            if prediction is not None and prediction == record['Survived']:
+            if prediction is not None and prediction == record[self.TARGET_LABEL]:
                 correct_predictions += 1
 
         accuracy = correct_predictions / total_records * 100
         print(f"Accuracy: {accuracy:.2f}% ({correct_predictions}/{total_records} correct predictions)")
 
         return accuracy
+
+
 def categorize_age(age):
     if 0 <= age <= 20:
         return "young"
@@ -298,11 +300,9 @@ def categorize_age(age):
 
 if __name__ == "__main__":
     data = pd.read_csv("data/titanic-homework.csv").to_dict(orient='records')
+    #data = pd.read_csv("data/Breast_Cancer.csv").to_dict(orient='records')
 
-    for record in data:
-        record['Age'] = categorize_age(record['Age'])
-
-    # data = [
+    # dataset_from_pres = [
     #     {'buying_price': 'high', 'doors':'4', 'safety': 'low', 'Survived': False},
     #     {'buying_price': 'high', 'doors':'5more', 'safety': 'high', 'Survived': True},
     #     {'buying_price': 'low', 'doors':'5more', 'safety': 'high', 'Survived': True},
@@ -314,6 +314,15 @@ if __name__ == "__main__":
     #     {'buying_price': 'vhigh', 'doors':'3', 'safety': 'med', 'Survived': False},
     #     {'buying_price': 'vhigh', 'doors':'5more', 'safety': 'high', 'Survived': False},
     # ]
+
+
+    for record in data:
+        record['Age'] = categorize_age(record['Age'])
+
+    #ages = [{'age': values['Age'], 'decision': values['Survived']} for values in data]
+    #ages_sorted = sorted(ages, key=lambda x: x['age'])
+
+
 
     dti = DecisionTreeInductor(data=data, target_label='Survived', excluded_keys={'PassengerId', 'Name'} )
     entropies = dti.build_tree()
