@@ -4,7 +4,7 @@ import pandas as pd
 pd.options.mode.chained_assignment = None
 
 class DecisionTreeInductor:
-    def __init__(self, data: dict = None, target_label: str = 'Survived',  excluded_keys: list = []):
+    def __init__(self, data: dict = None, target_label: str = 'Survived',  excluded_keys: set = ()):
         self.data = data
         self.excluded_keys = excluded_keys
         self.TARGET_LABEL = target_label
@@ -28,11 +28,11 @@ class DecisionTreeInductor:
         self.total_decisions = self.total_decisions = sum(decision for decision in self.decision_counts.values())  # 10
         self.keys_probabilities = self._count_keys_probabilities()
 
-    def build_tree(self, data=None, excluded_keys=None):
+    def build_tree(self, data: list = None, excluded_keys: set=None):
         """
         Recursively builds the decision tree.
         :param data: subset of data to build the tree on
-        :param excluded_keys: list of keys to exclude from the splitting process (used in recursion)
+        :param excluded_keys: set of keys to exclude from the splitting process (used in recursion)
         :return: decision tree (dict)
         """
         if data is None:
@@ -52,7 +52,12 @@ class DecisionTreeInductor:
             return decisions[0]  # return the single decision
 
         # If no more attributes to split on, return the majority decision as a leaf node
-        if len(excluded_keys) == len(self.keys):
+        ended = True
+        for key in self.keys:
+            if key not in excluded_keys:
+                ended = False
+                break
+        if ended:
             return decision_counts.most_common(1)[0][0]  # return the majority class
 
         # Select the best key to split on (you can choose either information gain or gain ratio)
@@ -63,7 +68,7 @@ class DecisionTreeInductor:
 
         # Add the best key to the excluded list so it isn't split again
         new_excluded_keys = excluded_keys.copy()
-        new_excluded_keys.append(best_key)
+        new_excluded_keys.add(best_key)
 
         # Get the unique values of the best key and build branches for each
         key_values = set([record[best_key] for record in data])
@@ -201,6 +206,69 @@ class DecisionTreeInductor:
         return {key: len(key_list) / self.total_decisions for key, key_list in self.key_lists.items()}
 
 
+    def print_tree(self, tree, depth=0):
+        """
+        Recursively prints the decision tree in a readable format with indentation.
+        :param tree: the decision tree (dict)
+        :param depth: current depth level in the tree (used for indentation)
+        """
+        indent = "  " * depth  # Indentation based on the tree depth
+        if isinstance(tree, dict):
+            for key, value in tree.items():
+                print(f"{indent}{key}:")
+                if isinstance(value, dict):
+                    self.print_tree(value, depth + 1)  # Recurse into subtree with increased depth
+                else:
+                    print(f"{indent}  -> {value}")  # Print leaf node (decision)
+        else:
+            print(f"{indent}-> {tree}")  # Handle case for direct decision values
+
+
+    def check_prediction(self, tree, record):
+        """
+        Sprawdza przewidywanie dla pojedynczego rekordu w drzewie decyzyjnym.
+        :param tree: Drzewo decyzyjne (słownik).
+        :param record: Pojedynczy rekord (słownik) z danymi.
+        :return: Przewidywana wartość (np. True/False dla 'Survived').
+        """
+        if isinstance(tree, dict):
+            # Pobierz atrybut na którym następuje podział (pierwszy klucz w słowniku)
+            attribute = list(tree.keys())[0]
+            value = record[attribute]
+
+            if value in tree[attribute]:
+                # Rekurencyjnie przechodzimy do następnej gałęzi drzewa
+                return self.check_prediction(tree[attribute][value], record)
+            else:
+                # Jeśli wartość nie istnieje w drzewie, zwróć domyślną wartość
+                return None
+        else:
+            # Gdy dotrzemy do liścia drzewa, zwracamy wartość liścia
+            return tree
+
+
+    def evaluate_tree(self, tree, data):
+        """
+        Sprawdza poprawność przewidywań dla całego zbioru danych.
+        :param tree: Drzewo decyzyjne (słownik).
+        :param data: Dane (lista słowników).
+        :return: Wynik procentowy poprawnych przewidywań.
+        """
+        correct_predictions = 0
+        total_records = len(data)
+
+        for record in data:
+            # Pobierz przewidywanie z drzewa
+            prediction = self.check_prediction(tree, record)
+
+            # Sprawdź, czy przewidywanie zgadza się z rzeczywistą wartością
+            if prediction is not None and prediction == record['Survived']:
+                correct_predictions += 1
+
+        accuracy = correct_predictions / total_records * 100
+        print(f"Accuracy: {accuracy:.2f}% ({correct_predictions}/{total_records} correct predictions)")
+
+        return accuracy
 def categorize_age(age):
     if 0 <= age <= 20:
         return "young"
@@ -212,26 +280,12 @@ def categorize_age(age):
         return "unknown"
 
 
-def print_tree(tree, depth=0):
-    """
-    Recursively prints the decision tree in a readable format with indentation.
-    :param tree: the decision tree (dict)
-    :param depth: current depth level in the tree (used for indentation)
-    """
-    indent = "  " * depth  # Indentation based on the tree depth
-    if isinstance(tree, dict):
-        for key, value in tree.items():
-            print(f"{indent}{key}:")
-            if isinstance(value, dict):
-                print_tree(value, depth + 1)  # Recurse into subtree with increased depth
-            else:
-                print(f"{indent}  -> {value}")  # Print leaf node (decision)
-    else:
-        print(f"{indent}-> {tree}")  # Handle case for direct decision values
-
 
 if __name__ == "__main__":
     data = pd.read_csv("data/titanic-homework.csv").to_dict(orient='records')
+
+    for record in data:
+        record['Age'] = categorize_age(record['Age'])
 
     # data = [
     #     {'buying_price': 'high', 'doors':'4', 'safety': 'low', 'Survived': False},
@@ -246,8 +300,8 @@ if __name__ == "__main__":
     #     {'buying_price': 'vhigh', 'doors':'5more', 'safety': 'high', 'Survived': False},
     # ]
 
-    dti = DecisionTreeInductor(data=data)#, target_label='Survived', excluded_keys=['PassengerId', 'Name', ])
+    dti = DecisionTreeInductor(data=data, target_label='Survived', excluded_keys={'PassengerId', 'Name'} )
     entropies = dti.build_tree()
     tree = dti.build_tree()
-
-    print_tree(tree)
+    dti.print_tree(tree)
+    dti.evaluate_tree(tree, data)
