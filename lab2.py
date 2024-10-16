@@ -3,11 +3,13 @@ from collections import Counter
 import pandas as pd
 pd.options.mode.chained_assignment = None
 
+
 class DecisionTreeInductor:
     def __init__(self, data: dict = None, target_label: str = 'Survived',  excluded_keys: set = None):
         self.data = data
         self.excluded_keys = excluded_keys or set()
         self.TARGET_LABEL = target_label
+
 
         self.decisions = [record[self.TARGET_LABEL] for record in data]
         self.decision_counts = Counter(self.decisions)
@@ -183,6 +185,58 @@ class DecisionTreeInductor:
             entropy_results['gain_ratio'][key] = gain_ratio
         return entropy_results
 
+    def build_tree(self, data, attributes):
+        # Base cases
+        if all_same_class(data['Survived']):
+            return DecisionTreeNode(is_leaf=True, label=data['Survived'].iloc[0])
+
+        if not attributes:
+            # Return a leaf node with the most common class
+            most_common_label = data['Survived'].mode()[0]
+            return DecisionTreeNode(is_leaf=True, label=most_common_label)
+
+        # Find the best attribute to split on
+        best_attribute = self._find_best_attribute(data, attributes)
+
+        # Create a new decision tree node for the best attribute
+        node = DecisionTreeNode(attribute=best_attribute)
+
+        # Split the dataset and recursively build the tree for each subset
+        for value in data[best_attribute].unique():
+            subset = data[data[best_attribute] == value]
+            # Remove the current attribute from the set of available attributes
+            new_attributes = [attr for attr in attributes if attr != best_attribute]
+            node.branches[value] = self.build_tree(subset, new_attributes)
+
+        return node
+
+    def _find_best_attribute(self, data, attributes):
+        # Implement information gain or gain ratio to select the best attribute
+        best_gain = -float('inf')
+        best_attribute = None
+
+        for attribute in attributes:
+            grouped_data = data.groupby(attribute)['Survived'].apply(list).to_dict()
+            self.data = grouped_data
+            self.run()
+            # Use information gain or gain ratio from the run results
+            gain = self._information_gain_calculation(
+                self._entropy_calculation(**{str(k): v for k, v in self.decision_counts.items()}),
+                self._conditional_entropy_calculation(
+                    (len(grouped_data[key]) / self.total_decisions,
+                     self._entropy_calculation(**Counter(grouped_data[key]))) for key in grouped_data
+                )
+            )
+
+            if gain > best_gain:
+                best_gain = gain
+                best_attribute = attribute
+
+        return best_attribute
+
+    def visualize_tree(self):
+        self.graph.render('decision_tree', view=True, format='png')
+
     def _entropy_calculation(self, **kwargs) -> float:
         """
         :param kwargs
@@ -298,6 +352,10 @@ def categorize_age(age):
 
 
 
+def all_same_class(column):
+    """Check if all values in the column are the same (i.e., same class)."""
+    return column.nunique() == 1
+
 if __name__ == "__main__":
     data = pd.read_csv("data/titanic-homework.csv").to_dict(orient='records')
     #data = pd.read_csv("data/Breast_Cancer.csv").to_dict(orient='records')
@@ -321,7 +379,6 @@ if __name__ == "__main__":
 
     #ages = [{'age': values['Age'], 'decision': values['Survived']} for values in data]
     #ages_sorted = sorted(ages, key=lambda x: x['age'])
-
 
 
     dti = DecisionTreeInductor(data=data, target_label='Survived', excluded_keys={'PassengerId', 'Name'} )
