@@ -185,30 +185,6 @@ class DecisionTreeInductor:
             entropy_results['gain_ratio'][key] = gain_ratio
         return entropy_results
 
-    def build_tree(self, data, attributes):
-        # Base cases
-        if all_same_class(data['Survived']):
-            return DecisionTreeNode(is_leaf=True, label=data['Survived'].iloc[0])
-
-        if not attributes:
-            # Return a leaf node with the most common class
-            most_common_label = data['Survived'].mode()[0]
-            return DecisionTreeNode(is_leaf=True, label=most_common_label)
-
-        # Find the best attribute to split on
-        best_attribute = self._find_best_attribute(data, attributes)
-
-        # Create a new decision tree node for the best attribute
-        node = DecisionTreeNode(attribute=best_attribute)
-
-        # Split the dataset and recursively build the tree for each subset
-        for value in data[best_attribute].unique():
-            subset = data[data[best_attribute] == value]
-            # Remove the current attribute from the set of available attributes
-            new_attributes = [attr for attr in attributes if attr != best_attribute]
-            node.branches[value] = self.build_tree(subset, new_attributes)
-
-        return node
 
     def _find_best_attribute(self, data, attributes):
         # Implement information gain or gain ratio to select the best attribute
@@ -382,7 +358,6 @@ if __name__ == "__main__":
 
 
     dti = DecisionTreeInductor(data=data, target_label='Survived', excluded_keys={'PassengerId', 'Name'} )
-    entropies = dti.build_tree()
     tree = dti.build_tree()
     dti.print_tree(tree)
     dti.evaluate_tree(tree, data)
