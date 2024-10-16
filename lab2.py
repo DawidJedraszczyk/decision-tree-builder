@@ -91,7 +91,7 @@ class DecisionTreeInductor:
         :return: the key with the highest information gain or gain ratio
         """
         # Calculate information gain or gain ratio for each key
-        entropies = self.run()
+        entropies = self.run(data)
 
         # Select the key with the highest gain ratio (you could choose information gain here instead)
         best_key = max((key for key in self.keys if key not in excluded_keys),
@@ -99,7 +99,14 @@ class DecisionTreeInductor:
 
         return best_key
 
-    def run(self):
+    def run(self, data=None):
+        """
+        Calculates entropy, conditional entropy, information gain, etc. for a given dataset.
+        If no data is provided, it defaults to the entire dataset.
+        """
+        if data is None:
+            data = self.data
+
         entropy_results = {
             'entropy': {},
             'conditional_entropy': {},
@@ -108,14 +115,22 @@ class DecisionTreeInductor:
             'gain_ratio': {}
         }
 
-        # entropy for all decisions
+        # Calculate entropy for the current subset of data
+        decisions = [record[self.TARGET_LABEL] for record in data]
+        decision_counts = Counter(decisions)
+
         entropy_results['entropy']['value'] = self._entropy_calculation(
-            **{str(k): v for k, v in self.decision_counts.items()})
+            **{str(k): v for k, v in decision_counts.items()}
+        )
 
-        # entropy for decisions for one key
+        # Calculate entropy and other metrics for each key
+        key_lists = {key: [] for key in self.keys if key not in self.excluded_keys}
+        for record in data:
+            for key in key_lists:
+                key_lists[key].append({'value': record[key], 'decision': record[self.TARGET_LABEL]})
+
         conditional_entropy_data_holder = []
-        for key, value_list in self.key_lists.items():
-
+        for key, value_list in key_lists.items():
             entropy_results['entropy'][key] = {}
             entropy_results['conditional_entropy'][key] = {}
             entropy_results['intrinsic_info'][key] = {}
@@ -200,7 +215,7 @@ class DecisionTreeInductor:
         return self._entropy_calculation(**kwargs)
 
     def _gain_ratio_calculation(self, gain_value: float, intrinsic_info_calculation_value: float) -> float:
-        return round(gain_value / intrinsic_info_calculation_value, 4)
+        return round(gain_value / intrinsic_info_calculation_value, 4) if intrinsic_info_calculation_value != 0 else 0
 
     def _count_keys_probabilities(self):
         return {key: len(key_list) / self.total_decisions for key, key_list in self.key_lists.items()}
