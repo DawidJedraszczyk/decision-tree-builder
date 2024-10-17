@@ -1,6 +1,7 @@
 import math
 from collections import Counter
 import pandas as pd
+import graphviz
 pd.options.mode.chained_assignment = None
 
 
@@ -29,6 +30,8 @@ class DecisionTreeInductor:
 
         self.total_decisions = self.total_decisions = sum(decision for decision in self.decision_counts.values())  # 10
         self.keys_probabilities = self._count_keys_probabilities()
+        self.graph = graphviz.Digraph(comment='Decision Tree')
+
 
     def build_tree(self, data: list = None, excluded_keys: set=None):
         """
@@ -61,8 +64,8 @@ class DecisionTreeInductor:
             return decision_counts.most_common(1)[0][0], dict(decision_counts)  # return the majority class with counts
 
         # Select the best key to split on (you can choose either information gain or gain ratio)
-        best_key = self._select_best_key(data, excluded_keys)
 
+        best_key = self._select_best_key(data, excluded_keys)
         # Create a node for the best key
         tree = {best_key: {}}
 
@@ -92,10 +95,13 @@ class DecisionTreeInductor:
         """
         # Calculate information gain or gain ratio for each key
         entropies = self.run(data)
+        print(entropies)
 
         # Select the key with the highest gain ratio (you could choose information gain here instead)
         best_key = max((key for key in self.keys if key not in excluded_keys),
                        key=lambda k: entropies['gain_ratio'][k])
+        print("Wyznaczono: ", best_key)
+        print("")
 
         return best_key
 
@@ -183,7 +189,52 @@ class DecisionTreeInductor:
             gain_value = entropy_results['entropy']['value'] - key_conditional_entropy
             gain_ratio = self._gain_ratio_calculation(gain_value, intrinsic_info)
             entropy_results['gain_ratio'][key] = gain_ratio
+
         return entropy_results
+
+    def visualize_tree(self, tree=None, parent_id='root'):
+        """
+        Recursively generates a Graphviz visualization of the decision tree with keys as sub-nodes and values as leafs.
+        :param tree: the decision tree (dict or tuple)
+        :param parent_id: the id of the parent node
+        """
+        if tree is None:
+            tree = self.build_tree()  # Build the tree if not provided
+
+        if isinstance(tree, dict):
+            # Internal node (Key)
+            key = next(iter(tree))  # Get the key (attribute)
+            key_node_id = f"{parent_id}_{key}"  # Create a unique node ID for the key
+            self.graph.node(key_node_id, key, shape='ellipse')  # Create a node for the key
+
+            if parent_id != 'root':
+                self.graph.edge(parent_id, key_node_id)  # Connect the current node to its parent
+
+            for value, subtree in tree[key].items():
+                # Value node (each value of the key as an edge)
+                value_node_id = f"{key_node_id}_{value}"  # Create a unique node ID for the value
+                self.graph.node(value_node_id, str(value), shape='box')  # Create a node for the value
+
+                # Connect key to the value
+                self.graph.edge(key_node_id, value_node_id, label=str(value))
+
+                # Recursively visualize the subtree
+                self.visualize_tree(subtree, parent_id=value_node_id)
+
+        elif isinstance(tree, tuple):
+            # Leaf node: show decision and class counts
+            decision, class_counts = tree
+            leaf_label = f"Decision: {decision}\n" + ", ".join([f"Count: {cnt}" for cls, cnt in class_counts.items()])
+            self.graph.node(parent_id, leaf_label, shape='box')  # Leaf node in box shape
+
+        else:
+            # Handle direct leaf case (if it's just a decision, not a tuple)
+            self.graph.node(parent_id, f"Decision: {tree}", shape='box')
+
+    def render_tree(self):
+        """Render and display the decision tree as an image."""
+        self.graph.render('decision_tree', format='png', view=True)  # Render the tree
+
 
 
     def _find_best_attribute(self, data, attributes):
@@ -209,9 +260,6 @@ class DecisionTreeInductor:
                 best_attribute = attribute
 
         return best_attribute
-
-    def visualize_tree(self):
-        self.graph.render('decision_tree', view=True, format='png')
 
     def _entropy_calculation(self, **kwargs) -> float:
         """
@@ -327,11 +375,6 @@ def categorize_age(age):
         return "unknown"
 
 
-
-def all_same_class(column):
-    """Check if all values in the column are the same (i.e., same class)."""
-    return column.nunique() == 1
-
 if __name__ == "__main__":
     data = pd.read_csv("data/titanic-homework.csv").to_dict(orient='records')
     #data = pd.read_csv("data/Breast_Cancer.csv").to_dict(orient='records')
@@ -360,4 +403,6 @@ if __name__ == "__main__":
     dti = DecisionTreeInductor(data=data, target_label='Survived', excluded_keys={'PassengerId', 'Name'} )
     tree = dti.build_tree()
     dti.print_tree(tree)
+    dti.visualize_tree(tree)
+    dti.render_tree()  # Renders the tree to a file and opens the image
     dti.evaluate_tree(tree, data)
